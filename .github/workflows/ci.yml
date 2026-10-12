@@ -1,0 +1,30 @@
+name: Package CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.1.0
+        with:
+          python-version: "3.14.0"
+      - run: python -m unittest discover -s scripts -p 'test_*.py'
+      - name: Validate PKGBUILD syntax and metadata in Arch Linux
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/workspace:ro" archlinux:base-devel bash -lc '
+            pacman -Syu --noconfirm --needed namcap shadow
+            useradd --create-home builder
+            cp -a /workspace/create-veasel-code-bin /tmp/create-veasel-code-bin
+            chown -R builder:builder /tmp/create-veasel-code-bin
+            su builder -c "cd /tmp/create-veasel-code-bin && bash -n PKGBUILD && makepkg --printsrcinfo > /tmp/SRCINFO && diff -u .SRCINFO /tmp/SRCINFO && namcap PKGBUILD"
+          '

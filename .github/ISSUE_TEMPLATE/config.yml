@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Veasel Code product support
+    url: https://github.com/veasel-labs/veasel/issues
+    about: Report runtime and provider problems in the main Veasel repository.

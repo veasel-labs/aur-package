@@ -1,0 +1,93 @@
+name: Publish packages to AUR
+
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Veasel release tag (for example v0.15.0-next.0)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aur-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.1.0
+        with:
+          python-version: "3.14.0"
+      - name: Update package versions and release checksums
+        run: python scripts/update-packages.py ${RELEASE_TAG:+"$RELEASE_TAG"}
+      - name: Regenerate SRCINFO and build the Arch package
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/workspace" archlinux:base-devel bash -lc '
+            pacman -Syu --noconfirm --needed bun git namcap shadow sqlite
+            useradd --create-home builder
+            package=create-veasel-code-bin
+            cp -a "/workspace/$package" "/tmp/$package"
+            chown -R builder:builder "/tmp/$package"
+            cd "/tmp/$package"
+            su builder -c "cd /tmp/$package && makepkg --printsrcinfo > .SRCINFO"
+            install -m 644 .SRCINFO "/workspace/$package/.SRCINFO"
+            namcap PKGBUILD
+            su builder -c "cd /tmp/$package && makepkg --cleanbuild --noconfirm"
+            namcap "$package"/*.pkg.tar.zst
+          '
+      - name: Configure AUR SSH authentication
+        run: |
+          set -euo pipefail
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "::error::Set AUR_SSH_PRIVATE_KEY in this repository's Actions secrets."
+            exit 1
+          fi
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur_publish"
+          chmod 600 "$HOME/.ssh/aur_publish"
+          printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Push package updates to AUR
+        run: |
+          set -euo pipefail
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_publish -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          for package in veasel-code-bin; do
+            remote="ssh://aur@aur.archlinux.org/${package}.git"
+            directory="$(mktemp -d)"
+            git clone "$remote" "$directory"
+            cp "$package/PKGBUILD" "$package/.SRCINFO" "$directory/"
+            git -C "$directory" config user.name "Ulises Jeremias"
+            git -C "$directory" config user.email "ulisescf.24@gmail.com"
+            git -C "$directory" add PKGBUILD .SRCINFO
+            if git -C "$directory" diff --cached --quiet; then
+              echo "${package} is already current on AUR."
+              continue
+            fi
+            git -C "$directory" commit -m "Update ${package} to ${RELEASE_TAG:-latest}"
+            git -C "$directory" push origin master
+          done
+      - name: Update GitHub mirror
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "GitHub package mirror is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO
+          git commit -m "chore: sync AUR packages to ${RELEASE_TAG:-latest}"
+          git push origin HEAD:main
