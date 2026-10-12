@@ -46,8 +46,8 @@ jobs:
             install -m 644 .SRCINFO "/workspace/$package/.SRCINFO"
             namcap PKGBUILD
             su builder -c "cd /tmp/$package && makepkg --cleanbuild --noconfirm"
-            namcap "$package"/*.pkg.tar.zst
-            pacman -U --noconfirm "$package"/*.pkg.tar.zst
+            namcap "/tmp/$package"/*.pkg.tar.zst
+            pacman -U --noconfirm "/tmp/$package"/*.pkg.tar.zst
             expected_version="$(sed -n 's/^pkgver=//p' PKGBUILD | sed 's/\.next\./-next./')"
             test "$(veasel --version)" = "Veasel Code $expected_version"
             veasel --help | grep -Fq "Start or reuse the local V backend"
