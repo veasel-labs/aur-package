@@ -47,6 +47,11 @@ jobs:
             namcap PKGBUILD
             su builder -c "cd /tmp/$package && makepkg --cleanbuild --noconfirm"
             namcap "$package"/*.pkg.tar.zst
+            pacman -U --noconfirm "$package"/*.pkg.tar.zst
+            expected_version="$(sed -n 's/^pkgver=//p' PKGBUILD | sed 's/\.next\./-next./')"
+            test "$(veasel --version)" = "Veasel Code $expected_version"
+            veasel --help | grep -Fq "Start or reuse the local V backend"
+            test -f /usr/lib/veasel-code/tui/package.json
           '
       - name: Configure AUR SSH authentication
         run: |
@@ -65,10 +70,11 @@ jobs:
           set -euo pipefail
           export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_publish -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           for package in veasel-code-bin; do
+            package_directory="create-${package}"
             remote="ssh://aur@aur.archlinux.org/${package}.git"
             directory="$(mktemp -d)"
             git clone "$remote" "$directory"
-            cp "$package/PKGBUILD" "$package/.SRCINFO" "$directory/"
+            cp "$package_directory/PKGBUILD" "$package_directory/.SRCINFO" "$directory/"
             git -C "$directory" config user.name "Ulises Jeremias"
             git -C "$directory" config user.email "ulisescf.24@gmail.com"
             git -C "$directory" add PKGBUILD .SRCINFO
