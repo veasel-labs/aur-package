@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import tarfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,39 @@ SPEC.loader.exec_module(MODULE)
 
 
 class UpdatePackageTests(unittest.TestCase):
+    @staticmethod
+    def make_archive(names: list[str]) -> bytes:
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode="w:gz") as archive:
+            for name in names:
+                content = b"fixture"
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
+        return data.getvalue()
+
+    def test_linux_release_archive_requires_standalone_backend_and_tui(self):
+        MODULE.validate_linux_bundle(self.make_archive(["veasel", "veasel-tui", "build.json"]))
+
+    def test_linux_release_archive_rejects_old_bun_client_layout(self):
+        with self.assertRaisesRegex(ValueError, "veasel-tui"):
+            MODULE.validate_linux_bundle(self.make_archive(["veasel", "tui/package.json", "build.json"]))
+
+    def test_linux_release_archive_rejects_symlinked_client(self):
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode="w:gz") as archive:
+            for name in ("veasel", "build.json"):
+                content = b"fixture"
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
+            link = tarfile.TarInfo("veasel-tui")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "/tmp/untrusted"
+            archive.addfile(link)
+        with self.assertRaisesRegex(ValueError, "regular file"):
+            MODULE.validate_linux_bundle(data.getvalue())
+
     def test_release_tag_requires_semver_and_maps_to_arch_version(self):
         match = MODULE.TAG_PATTERN.fullmatch("v0.15.1-next.2")
         self.assertIsNotNone(match)

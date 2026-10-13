@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD:/workspace" archlinux:base-devel bash -lc '
-            pacman -Syu --noconfirm --needed bun git namcap shadow sqlite
+            pacman -Syu --noconfirm --needed namcap shadow
             useradd --create-home builder
             package=create-veasel-code-bin
             cp -a "/workspace/$package" "/tmp/$package"
@@ -51,7 +51,8 @@ jobs:
             expected_version="$(sed -n 's/^pkgver=//p' PKGBUILD | sed 's/\.next\./-next./')"
             test "$(veasel --version)" = "Veasel Code $expected_version"
             veasel --help | grep -Fq "Start or reuse the local V backend"
-            test -f /usr/lib/veasel-code/tui/package.json
+            test -x /usr/lib/veasel-code/veasel-tui
+            test -f /usr/share/veasel-code/build.json
           '
       - name: Configure AUR SSH authentication
         run: |
