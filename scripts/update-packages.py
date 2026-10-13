@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import sys
+import tarfile
 import urllib.request
 from pathlib import Path
 
@@ -41,6 +43,22 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def validate_linux_bundle(archive_data: bytes) -> None:
+    required_files = {"veasel", "veasel-tui", "build.json"}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive_data), mode="r:gz") as archive:
+            members = {member.name: member for member in archive.getmembers()}
+    except tarfile.TarError as error:
+        raise ValueError("Linux release asset is not a valid gzip tar archive") from error
+
+    missing = sorted(required_files - members.keys())
+    if missing:
+        raise ValueError(f"Linux release archive is missing required files: {', '.join(missing)}")
+    for name in required_files:
+        if not members[name].isfile():
+            raise ValueError(f"Linux release archive entry is not a regular file: {name}")
+
+
 def replace_pkg_metadata(path: Path, version: str, hashes: list[str]) -> None:
     content = path.read_text()
     content, changed = re.subn(r"(?m)^pkgver=.*$", f"pkgver={version}", content, count=1)
@@ -73,6 +91,7 @@ def update(tag: str | None) -> str:
     linux_archive = request(f"{base}/veasel-Linux.tar.gz")
     if sha256(linux_archive) != asset["sha256"]:
         raise ValueError("Linux archive digest does not match release.json")
+    validate_linux_bundle(linux_archive)
     license_file = request(f"https://raw.githubusercontent.com/veasel-labs/veasel/{tag_name}/LICENSE")
     binary = ROOT / "create-veasel-code-bin/PKGBUILD"
     replace_pkg_metadata(binary, package_version, [sha256(linux_archive), sha256(license_file)])
