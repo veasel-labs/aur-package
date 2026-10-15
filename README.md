@@ -32,13 +32,12 @@ secret; pull-request workflows never receive that secret.
 
 ## Current sync status
 
-As of 2026-10-15 the PKGBUILD tracks **`v0.38.0-next.0`**
-(`pkgver=0.38.0.next.0`), the newest verified public prerelease. Configured
-MCP (user/project scope and portable `.mcp.json` import) is on `veasel`
-`main` ahead of that tag. Do **not** invent tags or checksums by hand: when a
-newer verified prerelease publishes, dispatch **Publish packages to AUR** (or
-wait for the schedule) so the updater refreshes `pkgver` and `sha256sums`
-from the release manifest.
+As of 2026-10-15 the PKGBUILD tracks **`v0.39.0-next.0`**
+(`pkgver=0.39.0.next.0`), the newest verified public prerelease. That release
+includes configured MCP (user/project scope and portable `.mcp.json` import).
+Do **not** invent tags or checksums by hand: when a newer verified prerelease
+publishes, dispatch **Publish packages to AUR** (or wait for the schedule) so
+the updater refreshes `pkgver` and `sha256sums` from the release manifest.
 
 ## Local validation
 
