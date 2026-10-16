@@ -32,8 +32,8 @@ secret; pull-request workflows never receive that secret.
 
 ## Current sync status
 
-As of 2026-10-15 the PKGBUILD tracks **`v0.41.0-next.0`**
-(`pkgver=0.41.0.next.0`), the newest verified public prerelease. This package
+As of 2026-10-16 the PKGBUILD tracks **`v0.42.0-next.0`**
+(`pkgver=0.42.0.next.0`), the newest verified public prerelease. This package
 does **not** invent tags or digests: when a newer verified prerelease publishes,
 re-run **Publish packages to AUR** (or wait for the schedule).
 
