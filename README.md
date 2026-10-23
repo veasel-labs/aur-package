@@ -30,12 +30,14 @@ generated `.SRCINFO` are committed to this GitHub mirror.
 Maintainer credentials are stored only as the `AUR_SSH_PRIVATE_KEY` Actions
 secret; pull-request workflows never receive that secret.
 
-## Current sync status
+## Release sync
 
-As of 2026-10-16 the PKGBUILD tracks **`v0.42.0-next.0`**
-(`pkgver=0.42.0.next.0`), the newest verified public prerelease. This package
-does **not** invent tags or digests: when a newer verified prerelease publishes,
-re-run **Publish packages to AUR** (or wait for the schedule).
+The scheduled **Publish packages to AUR** workflow follows the newest public
+Veasel release, verifies its archive against the release manifest, builds the
+package in Arch Linux, and publishes the matching files to AUR and this GitHub
+mirror. The exact package version is recorded in
+[`create-veasel-code-bin/PKGBUILD`](create-veasel-code-bin/PKGBUILD), so this
+README does not drift behind automated updates.
 
 ## Local validation
 
