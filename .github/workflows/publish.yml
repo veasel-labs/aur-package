@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: aur-publish
@@ -30,7 +31,26 @@ jobs:
         with:
           python-version: "3.14.0"
       - name: Update package versions and release checksums
-        run: python scripts/update-packages.py ${RELEASE_TAG:+"$RELEASE_TAG"}
+        id: release
+        run: |
+          set -euo pipefail
+          if [[ -n "$RELEASE_TAG" ]]; then
+            result="$(python scripts/update-packages.py "$RELEASE_TAG")"
+          else
+            result="$(python scripts/update-packages.py)"
+          fi
+          printf '%s\n' "$result"
+          tag="${result##* }"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-next\.[0-9]+)?$ ]] || {
+            echo "::error::Unexpected Veasel release tag: $tag"
+            exit 1
+          }
+          version="${tag#v}"
+          package_version="${version/-next./.next.}"
+          {
+            echo "tag=$tag"
+            echo "branch=automation/aur-$package_version"
+          } >> "$GITHUB_OUTPUT"
       - name: Regenerate SRCINFO and build the Arch package
         run: |
           set -euo pipefail
@@ -55,6 +75,7 @@ jobs:
           '
       - name: Push package updates to AUR
         env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -69,31 +90,75 @@ jobs:
           unset AUR_SSH_PRIVATE_KEY
           printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$HOME/.ssh/known_hosts"
           export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_publish -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-          for package in veasel-code-bin; do
-            package_directory="create-${package}"
-            remote="ssh://aur@aur.archlinux.org/${package}.git"
-            directory="$(mktemp -d)"
-            git clone "$remote" "$directory"
-            cp "$package_directory/PKGBUILD" "$package_directory/.SRCINFO" "$directory/"
-            git -C "$directory" config user.name "Ulises Jeremias"
-            git -C "$directory" config user.email "ulisescf.24@gmail.com"
-            git -C "$directory" add PKGBUILD .SRCINFO
-            if git -C "$directory" diff --cached --quiet; then
-              echo "${package} is already current on AUR."
-              continue
-            fi
-            git -C "$directory" commit -m "Update ${package} to ${RELEASE_TAG:-latest}"
-            git -C "$directory" push origin master
-          done
+          package=veasel-code-bin
+          package_directory="create-${package}"
+          remote="ssh://aur@aur.archlinux.org/${package}.git"
+          directory="$(mktemp -d)"
+          git clone "$remote" "$directory"
+          cp "$package_directory/PKGBUILD" "$package_directory/.SRCINFO" "$directory/"
+          git -C "$directory" config user.name "Ulises Jeremias"
+          git -C "$directory" config user.email "ulisescf.24@gmail.com"
+          git -C "$directory" add PKGBUILD .SRCINFO
+          if git -C "$directory" diff --cached --quiet; then
+            echo "${package} is already current on AUR."
+            exit 0
+          fi
+          git -C "$directory" commit -m "Update ${package} to $RELEASE_TAG"
+          git -C "$directory" push origin master
       - name: Update GitHub mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_BRANCH: ${{ steps.release.outputs.branch }}
         run: |
           set -euo pipefail
-          if git diff --quiet; then
+          files=(create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO)
+          if git diff --quiet -- "${files[@]}"; then
             echo "GitHub package mirror is already current."
             exit 0
           fi
+          if git ls-remote --exit-code origin "refs/heads/$RELEASE_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+            if ! git diff --quiet "origin/$RELEASE_BRANCH" -- "${files[@]}"; then
+              echo "::error::Existing mirror branch has different package metadata; refusing to overwrite it."
+              exit 1
+            fi
+            git stash push --message "prepare AUR mirror $RELEASE_TAG" -- "${files[@]}"
+            git switch --create "$RELEASE_BRANCH" --track "origin/$RELEASE_BRANCH"
+            git stash pop
+          else
+            git switch --create "$RELEASE_BRANCH"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO
-          git commit -m "chore: sync AUR packages to ${RELEASE_TAG:-latest}"
-          git push origin HEAD:main
+          git add "${files[@]}"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync AUR packages to $RELEASE_TAG"
+            git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
+          fi
+          cat > "$RUNNER_TEMP/aur-mirror-pr.md" <<EOF
+          ## Summary
+
+          Sync the GitHub package mirror to verified AUR package release ${RELEASE_TAG}.
+
+          ## Validation
+
+          The publisher verifies the release manifest, builds and inspects the Arch package, and publishes the matching PKGBUILD and .SRCINFO to AUR. Package CI validates the proposed GitHub mirror. A human reviews and merges this mirror update.
+
+          ## Scope
+
+          Generated PKGBUILD and .SRCINFO only.
+          EOF
+          pull_request="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --head "$GITHUB_REPOSITORY_OWNER:$RELEASE_BRANCH" \
+            --json number --jq '.[0].number // empty')"
+          if [[ -n "$pull_request" ]]; then
+            gh pr edit "$pull_request" --repo "$GITHUB_REPOSITORY" \
+              --title "chore: sync AUR package mirror to $RELEASE_TAG" \
+              --body-file "$RUNNER_TEMP/aur-mirror-pr.md"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main \
+              --head "$RELEASE_BRANCH" --draft \
+              --title "chore: sync AUR package mirror to $RELEASE_TAG" \
+              --body-file "$RUNNER_TEMP/aur-mirror-pr.md"
+          fi
