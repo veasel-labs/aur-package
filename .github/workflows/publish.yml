@@ -45,11 +45,9 @@ jobs:
             echo "::error::Unexpected Veasel release tag: $tag"
             exit 1
           }
-          version="${tag#v}"
-          package_version="${version/-next./.next.}"
           {
             echo "tag=$tag"
-            echo "branch=automation/aur-$package_version"
+            echo "branch=automation/aur-mirror"
           } >> "$GITHUB_OUTPUT"
       - name: Regenerate SRCINFO and build the Arch package
         run: |
@@ -117,18 +115,17 @@ jobs:
             echo "GitHub package mirror is already current."
             exit 0
           fi
+          mirror_directory="$(mktemp -d)"
+          cp "${files[@]}" "$mirror_directory/"
+          git restore --source=HEAD --staged --worktree -- "${files[@]}"
           if git ls-remote --exit-code origin "refs/heads/$RELEASE_BRANCH" >/dev/null 2>&1; then
             git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
-            if ! git diff --quiet "origin/$RELEASE_BRANCH" -- "${files[@]}"; then
-              echo "::error::Existing mirror branch has different package metadata; refusing to overwrite it."
-              exit 1
-            fi
-            git stash push --message "prepare AUR mirror $RELEASE_TAG" -- "${files[@]}"
             git switch --create "$RELEASE_BRANCH" --track "origin/$RELEASE_BRANCH"
-            git stash pop
           else
             git switch --create "$RELEASE_BRANCH"
           fi
+          cp "$mirror_directory/PKGBUILD" create-veasel-code-bin/PKGBUILD
+          cp "$mirror_directory/.SRCINFO" create-veasel-code-bin/.SRCINFO
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${files[@]}"
