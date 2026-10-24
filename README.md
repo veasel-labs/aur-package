@@ -25,8 +25,9 @@ start only the server.
 
 The scheduled publisher follows Veasel's public prereleases, validates the
 release manifest checksum, refreshes the PKGBUILD, builds and inspects the
-package in Arch Linux, then pushes it to AUR over SSH. The same PKGBUILD and
-generated `.SRCINFO` are committed to this GitHub mirror.
+package in Arch Linux, then pushes it to AUR over SSH. It opens a draft PR for
+the matching GitHub mirror update; a human reviews and merges that mirror
+change.
 Maintainer credentials are stored only as the `AUR_SSH_PRIVATE_KEY` Actions
 secret; pull-request workflows never receive that secret.
 
@@ -34,8 +35,8 @@ secret; pull-request workflows never receive that secret.
 
 The scheduled **Publish packages to AUR** workflow follows the newest public
 Veasel release, verifies its archive against the release manifest, builds the
-package in Arch Linux, and publishes the matching files to AUR and this GitHub
-mirror. The exact package version is recorded in
+package in Arch Linux, publishes it to AUR, and proposes matching files for
+this GitHub mirror in a draft PR. The exact package version is recorded in
 [`create-veasel-code-bin/PKGBUILD`](create-veasel-code-bin/PKGBUILD), so this
 README does not drift behind automated updates.
 
