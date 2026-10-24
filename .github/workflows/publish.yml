@@ -63,12 +63,11 @@ jobs:
             exit 1
           fi
           install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur_publish"
-          chmod 600 "$HOME/.ssh/aur_publish"
-          unset AUR_SSH_PRIVATE_KEY
+          umask 077
           trap 'rm -f "$HOME/.ssh/aur_publish"' EXIT
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur_publish"
+          unset AUR_SSH_PRIVATE_KEY
           printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
           export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_publish -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           for package in veasel-code-bin; do
             package_directory="create-${package}"
