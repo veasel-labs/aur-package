@@ -148,7 +148,7 @@ jobs:
           Generated PKGBUILD and .SRCINFO only.
           EOF
           pull_request="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-            --head "$GITHUB_REPOSITORY_OWNER:$RELEASE_BRANCH" \
+            --head "$RELEASE_BRANCH" \
             --json number --jq '.[0].number // empty')"
           if [[ -n "$pull_request" ]]; then
             gh pr edit "$pull_request" --repo "$GITHUB_REPOSITORY" \
