@@ -37,3 +37,8 @@ jobs:
             /usr/lib/veasel-code/veasel-tui --version | grep -F "Veasel Code Terminal "
             test -f /usr/share/veasel-code/build.json
           '
+            # Verify package removal does not leave managed binaries behind.
+            pacman -Rns --noconfirm veasel-code-bin
+            test ! -e /usr/bin/veasel
+            test ! -e /usr/lib/veasel-code/veasel-tui
+            test ! -e /usr/share/veasel-code/build.json
