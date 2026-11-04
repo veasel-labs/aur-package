@@ -17,8 +17,10 @@ exact files published to AUR.
 | [`veasel-code-bin`](https://aur.archlinux.org/packages/veasel-code-bin) | Installs the official x86_64 Linux backend and bundled terminal client from the verified GitHub release. | `yay -S veasel-code-bin` |
 
 The package installs the native `veasel` backend and its standalone terminal client; Bun is not required at runtime.
-Run `veasel` to start or reuse the local backend and open the TUI. Press `s` to
-configure the provider, model, endpoint, and API key. Run `veasel serve` to
+Run `veasel` to start or reuse the local backend and open the TUI. Use
+`/connect` on the home screen to configure a provider and model, then press
+`n` to create a project session before sending prompts. Press `s` for advanced
+provider/model settings such as endpoint overrides. Run `veasel serve` to
 start only the server.
 
 ## Automated updates
