@@ -11,6 +11,7 @@ import sys
 import tarfile
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 API = "https://api.github.com/repos/veasel-labs/veasel/releases"
@@ -25,13 +26,13 @@ def request(url: str) -> bytes:
 
 
 def resolve_release(tag: str | None) -> dict[str, object]:
-    releases = json.loads(request(f"{API}?per_page=100"))
     if tag:
-        release = next((item for item in releases if item["tag_name"] == tag), None)
+        if not TAG_PATTERN.fullmatch(tag):
+            raise ValueError(f"Unsupported Veasel tag: {tag}")
+        release = json.loads(request(f"{API}/tags/{quote(tag, safe='')}"))
     else:
+        releases = json.loads(request(f"{API}?per_page=100"))
         release = next((item for item in releases if not item["draft"]), None)
-    if release is None:
-        raise ValueError(f"Veasel release not found: {tag or 'latest'}")
     if release["draft"]:
         raise ValueError("Draft releases cannot be packaged")
     if not TAG_PATTERN.fullmatch(release["tag_name"]):

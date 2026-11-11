@@ -1,8 +1,10 @@
 import importlib.util
 import io
+import json
 import tarfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("update-packages.py")
@@ -52,6 +54,19 @@ class UpdatePackageTests(unittest.TestCase):
         assert match is not None
         self.assertEqual(match.group("version").replace("-next.", ".next."), "0.15.1.next.2")
         self.assertIsNone(MODULE.TAG_PATTERN.fullmatch("v0.15.1-rc.1"))
+
+    def test_explicit_tag_uses_direct_release_lookup(self):
+        tag = "v0.69.14-next.0"
+        release = {"tag_name": tag, "draft": False}
+        with patch.object(MODULE, "request", return_value=json.dumps(release).encode()) as request:
+            self.assertEqual(MODULE.resolve_release(tag), release)
+        request.assert_called_once_with(f"{MODULE.API}/tags/{tag}")
+
+    def test_explicit_invalid_tag_is_rejected_before_network_request(self):
+        with patch.object(MODULE, "request") as request:
+            with self.assertRaisesRegex(ValueError, "Unsupported Veasel tag"):
+                MODULE.resolve_release("v0.69.14/next")
+        request.assert_not_called()
 
     def test_checksum_replacement_updates_only_pkg_metadata(self):
         import tempfile
