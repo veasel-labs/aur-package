@@ -14,31 +14,52 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14.0"
       - run: python -m unittest discover -s scripts -p 'test_*.py'
-      - name: Validate PKGBUILD syntax and metadata in Arch Linux
+      - name: Prepare base-version package for upgrade acceptance
+        id: package-history
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/workspace:ro" archlinux:base-devel bash -lc '
-            pacman -Syu --noconfirm --needed namcap shadow
-            useradd --create-home builder
-            cp -a /workspace/create-veasel-code-bin /tmp/create-veasel-code-bin
-            chown -R builder:builder /tmp/create-veasel-code-bin
-            su builder -c "cd /tmp/create-veasel-code-bin && bash -n PKGBUILD && makepkg --printsrcinfo > /tmp/SRCINFO && diff -u .SRCINFO /tmp/SRCINFO && namcap PKGBUILD"
-            # Build the *actual* package from the checksum-verified release
-            # archives, then install it in a clean Arch container. Metadata
-            # validation alone cannot catch broken files or install paths.
-            su builder -c "cd /tmp/create-veasel-code-bin && makepkg --cleanbuild --noconfirm"
-            pacman -U --noconfirm /tmp/create-veasel-code-bin/veasel-code-bin-*.pkg.tar.zst
-            veasel --version | grep -F "Veasel Code "
-            test -x /usr/lib/veasel-code/veasel-tui
-            /usr/lib/veasel-code/veasel-tui --version | grep -F "Veasel Code Terminal "
-            test -f /usr/share/veasel-code/build.json
-            # Verify package removal does not leave managed binaries behind.
-            pacman -Rns --noconfirm veasel-code-bin
-            test ! -e /usr/bin/veasel
-            test ! -e /usr/lib/veasel-code/veasel-tui
-            test ! -e /usr/share/veasel-code/build.json
-          '
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base_sha="$PR_BASE_SHA"
+          else
+            base_sha="$PUSH_BEFORE_SHA"
+          fi
+          mkdir -p "$RUNNER_TEMP/previous-package"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            echo "has_previous=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base_pkgbuild="$RUNNER_TEMP/base-PKGBUILD"
+          git show "$base_sha:create-veasel-code-bin/PKGBUILD" > "$base_pkgbuild"
+          previous_pkgver="$(sed -n 's/^pkgver=//p' "$base_pkgbuild")"
+          previous_pkgrel="$(sed -n 's/^pkgrel=//p' "$base_pkgbuild")"
+          current_pkgver="$(sed -n 's/^pkgver=//p' create-veasel-code-bin/PKGBUILD)"
+          current_pkgrel="$(sed -n 's/^pkgrel=//p' create-veasel-code-bin/PKGBUILD)"
+          if [[ "${previous_pkgver}-${previous_pkgrel}" == "${current_pkgver}-${current_pkgrel}" ]]; then
+            echo "Package version unchanged at ${current_pkgver}-${current_pkgrel}; testing clean install/uninstall only."
+            echo "has_previous=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for file in PKGBUILD .SRCINFO; do
+            git show "$base_sha:create-veasel-code-bin/$file" > "$RUNNER_TEMP/previous-package/$file"
+          done
+          echo "has_previous=true" >> "$GITHUB_OUTPUT"
+          echo "Testing package update from ${previous_pkgver}-${previous_pkgrel} to ${current_pkgver}-${current_pkgrel}."
+      - name: Validate PKGBUILD syntax and metadata in Arch Linux
+        env:
+          HAS_PREVIOUS_PACKAGE: ${{ steps.package-history.outputs.has_previous }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e HAS_PREVIOUS_PACKAGE="$HAS_PREVIOUS_PACKAGE" \
+            -v "$PWD:/workspace:ro" \
+            -v "$RUNNER_TEMP/previous-package:/previous:ro" \
+            archlinux:base-devel bash /workspace/scripts/accept-package-install.sh
