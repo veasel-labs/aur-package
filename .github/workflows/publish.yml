@@ -47,7 +47,7 @@ jobs:
           }
           {
             echo "tag=$tag"
-            echo "branch=automation/aur-mirror"
+            echo "branch=automation/aur-mirror-${tag}"
           } >> "$GITHUB_OUTPUT"
       - name: Regenerate SRCINFO and build the Arch package
         run: |
