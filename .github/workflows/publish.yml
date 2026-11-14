@@ -32,6 +32,8 @@ jobs:
           python-version: "3.14.0"
       - name: Update package versions and release checksums
         id: release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -n "$RELEASE_TAG" ]]; then

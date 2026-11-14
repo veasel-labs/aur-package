@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import os
 import tarfile
 import unittest
 from pathlib import Path
@@ -61,6 +62,24 @@ class UpdatePackageTests(unittest.TestCase):
         with patch.object(MODULE, "request", return_value=json.dumps(release).encode()) as request:
             self.assertEqual(MODULE.resolve_release(tag), release)
         request.assert_called_once_with(f"{MODULE.API}/tags/{tag}")
+
+    def test_github_token_authenticates_api_requests_only(self):
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b"ok"
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "fixture-token"}), patch.object(
+            MODULE.urllib.request, "urlopen", return_value=response
+        ) as urlopen:
+            self.assertEqual(MODULE.request(f"{MODULE.API}/tags/v0.1.0"), b"ok")
+            api_request = urlopen.call_args.args[0]
+            self.assertEqual(api_request.get_header("Authorization"), "Bearer fixture-token")
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "fixture-token"}), patch.object(
+            MODULE.urllib.request, "urlopen", return_value=response
+        ) as urlopen:
+            MODULE.request("https://github.com/veasel-labs/veasel/releases/download/tag/release.json")
+            asset_request = urlopen.call_args.args[0]
+            self.assertIsNone(asset_request.get_header("Authorization"))
 
     def test_explicit_invalid_tag_is_rejected_before_network_request(self):
         with patch.object(MODULE, "request") as request:
