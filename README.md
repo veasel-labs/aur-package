@@ -21,7 +21,9 @@ Run `veasel` to start or reuse the local backend and open the TUI. Use
 `/connect` on the home screen to configure a provider and model, then press
 `n` to create a project session before sending prompts. Press `s` for advanced
 provider/model settings such as endpoint overrides. Run `veasel serve` to
-start only the server.
+start only the server. Linux release archives that include `veasel-tui.desktop`
+also register the CLI in desktop launchers; the entry runs in a terminal as
+the invoking user, with no autostart or privileged helper.
 
 ## Automated updates
 
