@@ -37,6 +37,13 @@ install_package() {
 	test -x /usr/lib/veasel-code/veasel-tui
 	[[ "$(/usr/lib/veasel-code/veasel-tui --version)" == "Veasel Code Terminal ${expected_app_version}" ]]
 	test -f /usr/share/veasel-code/build.json
+	if pacman -Ql veasel-code-bin | grep -F ' /usr/share/applications/veasel-tui.desktop' >/dev/null; then
+		test -f /usr/share/applications/veasel-tui.desktop
+		grep -Fxq 'Exec=veasel' /usr/share/applications/veasel-tui.desktop
+		grep -Fxq 'Terminal=true' /usr/share/applications/veasel-tui.desktop
+	else
+		test ! -e /usr/share/applications/veasel-tui.desktop
+	fi
 }
 
 build_package /workspace/create-veasel-code-bin /tmp/current-package
@@ -58,6 +65,7 @@ test ! -e /usr/bin/veasel
 test ! -e /usr/lib/veasel-code/veasel
 test ! -e /usr/lib/veasel-code/veasel-tui
 test ! -e /usr/share/veasel-code/build.json
+test ! -e /usr/share/applications/veasel-tui.desktop
 
 if [[ "${HAS_PREVIOUS_PACKAGE:-false}" == "true" ]]; then
 	echo "AUR package install, upgrade, and uninstall acceptance passed."
