@@ -5,7 +5,7 @@ import os
 import tarfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 SCRIPT = Path(__file__).with_name("update-packages.py")
@@ -86,6 +86,125 @@ class UpdatePackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported Veasel tag"):
                 MODULE.resolve_release("v0.69.14/next")
         request.assert_not_called()
+
+    def test_release_tag_resolves_to_commit(self):
+        commit = "a" * 40
+        with patch.object(MODULE, "request", return_value=json.dumps({"object": {"type": "commit", "sha": commit}}).encode()) as request:
+            self.assertEqual(MODULE.resolve_tag_commit("v1.2.3-next.0"), commit)
+        request.assert_called_once_with(f"{MODULE.GIT_API}/ref/tags/v1.2.3-next.0")
+
+    def test_release_tag_resolves_annotated_tag(self):
+        tag_sha = "b" * 40
+        commit_sha = "c" * 40
+        responses = [
+            {"object": {"type": "tag", "sha": tag_sha}},
+            {"object": {"type": "commit", "sha": commit_sha}},
+        ]
+        with patch.object(MODULE, "request", side_effect=[json.dumps(item).encode() for item in responses]) as request:
+            self.assertEqual(MODULE.resolve_tag_commit("v1.2.3-next.0"), commit_sha)
+        self.assertEqual(request.call_count, 2)
+
+    def test_release_tag_rejects_non_commit_target(self):
+        with patch.object(MODULE, "request", return_value=json.dumps({"object": {"type": "tree", "sha": "a" * 40}}).encode()):
+            with self.assertRaisesRegex(ValueError, "does not resolve to a commit"):
+                MODULE.resolve_tag_commit("v1.2.3-next.0")
+
+    def test_release_asset_requires_matching_github_sha256(self):
+        content = b"immutable release asset"
+        release = {"assets": [{"name": "release.json", "digest": f"sha256:{MODULE.sha256(content)}"}]}
+        self.assertEqual(MODULE.verify_github_asset_digest(release, "release.json", content), MODULE.sha256(content))
+        with self.assertRaisesRegex(ValueError, "does not match GitHub"):
+            MODULE.verify_github_asset_digest(release, "release.json", b"tampered")
+        with self.assertRaisesRegex(ValueError, "no SHA-256 digest"):
+            MODULE.verify_github_asset_digest({"assets": [{"name": "release.json"}]}, "release.json", content)
+        duplicate = {"assets": release["assets"] * 2}
+        with self.assertRaisesRegex(ValueError, "ambiguous or missing"):
+            MODULE.verify_github_asset_digest(duplicate, "release.json", content)
+
+    def test_linux_manifest_requires_tag_provenance_and_published_platform(self):
+        archive = self.make_archive(["veasel", "veasel-tui", "build.json"])
+        manifest = {
+            "tag": "v1.2.3-next.0",
+            "version": "1.2.3-next.0",
+            "source_commit": "a" * 40,
+            "platforms": {"linux": {"status": "published", "ci_result": "success", "arch": "x86_64"}},
+            "assets": [{
+                "name": "veasel-Linux.tar.gz",
+                "platform": "linux",
+                "arch": "x86_64",
+                "kind": "cli-archive",
+                "sha256": MODULE.sha256(archive),
+            }],
+        }
+        self.assertEqual(
+            MODULE.validate_linux_manifest(manifest, "v1.2.3-next.0", "1.2.3-next.0", "a" * 40)["sha256"],
+            MODULE.sha256(archive),
+        )
+        with self.assertRaisesRegex(ValueError, "source commit"):
+            MODULE.validate_linux_manifest(manifest, "v1.2.3-next.0", "1.2.3-next.0", "b" * 40)
+        manifest["platforms"]["linux"]["status"] = "failed"
+        with self.assertRaisesRegex(ValueError, "does not declare a successful"):
+            MODULE.validate_linux_manifest(manifest, "v1.2.3-next.0", "1.2.3-next.0", "a" * 40)
+
+    def test_update_pins_release_manifest_assets_and_license_to_tag_commit(self):
+        import tempfile
+
+        tag = "v1.2.3-next.0"
+        commit = "a" * 40
+        archive = self.make_archive(["veasel", "veasel-tui", "build.json"])
+        license_file = b"MIT license at immutable source commit"
+        manifest = {
+            "tag": tag,
+            "version": "1.2.3-next.0",
+            "source_commit": commit,
+            "platforms": {"linux": {"status": "published", "ci_result": "success", "arch": "x86_64"}},
+            "assets": [{
+                "name": "veasel-Linux.tar.gz",
+                "platform": "linux",
+                "arch": "x86_64",
+                "kind": "cli-archive",
+                "sha256": MODULE.sha256(archive),
+            }],
+        }
+        manifest_bytes = json.dumps(manifest).encode()
+        release = {
+            "tag_name": tag,
+            "draft": False,
+            "assets": [
+                {"name": "release.json", "digest": f"sha256:{MODULE.sha256(manifest_bytes)}"},
+                {"name": "veasel-Linux.tar.gz", "digest": f"sha256:{MODULE.sha256(archive)}"},
+            ],
+        }
+        api_release = f"{MODULE.API}/tags/{tag}"
+        api_tag = f"{MODULE.GIT_API}/ref/tags/{tag}"
+        manifest_url = f"https://github.com/veasel-labs/veasel/releases/download/{tag}/release.json"
+        archive_url = f"https://github.com/veasel-labs/veasel/releases/download/{tag}/veasel-Linux.tar.gz"
+        license_url = f"{MODULE.RAW}/{commit}/LICENSE"
+        responses = {
+            api_release: json.dumps(release).encode(),
+            api_tag: json.dumps({"object": {"type": "commit", "sha": commit}}).encode(),
+            manifest_url: manifest_bytes,
+            archive_url: archive,
+            license_url: license_file,
+        }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "create-veasel-code-bin"
+            package.mkdir()
+            pkgbuild = package / "PKGBUILD"
+            pkgbuild.write_text("pkgver=0.1.0\npkgrel=1\nsha256sums=(\n  'old'\n)\n")
+            with patch.object(MODULE, "ROOT", root), patch.object(
+                MODULE, "request", side_effect=lambda url: responses[url]
+            ) as request:
+                self.assertEqual(MODULE.update(tag), tag)
+
+            content = pkgbuild.read_text()
+            self.assertIn("pkgver=1.2.3.next.0", content)
+            self.assertIn(MODULE.sha256(archive), content)
+            self.assertIn(MODULE.sha256(license_file), content)
+            self.assertIn(call(api_tag), request.call_args_list)
+            self.assertIn(call(license_url), request.call_args_list)
 
     def test_checksum_replacement_updates_only_pkg_metadata(self):
         import tempfile
