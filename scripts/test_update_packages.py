@@ -58,7 +58,7 @@ class UpdatePackageTests(unittest.TestCase):
 
     def test_explicit_tag_uses_direct_release_lookup(self):
         tag = "v0.69.14-next.0"
-        release = {"tag_name": tag, "draft": False}
+        release = {"tag_name": tag, "draft": False, "immutable": True}
         with patch.object(MODULE, "request", return_value=json.dumps(release).encode()) as request:
             self.assertEqual(MODULE.resolve_release(tag), release)
         request.assert_called_once_with(f"{MODULE.API}/tags/{tag}")
@@ -86,6 +86,31 @@ class UpdatePackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported Veasel tag"):
                 MODULE.resolve_release("v0.69.14/next")
         request.assert_not_called()
+
+    def test_mutable_explicit_release_is_rejected(self):
+        tag = "v0.69.14-next.0"
+        for immutable in (False, None):
+            release = {"tag_name": tag, "draft": False, "immutable": immutable}
+            with patch.object(MODULE, "request", return_value=json.dumps(release).encode()):
+                with self.assertRaisesRegex(ValueError, "not immutable"):
+                    MODULE.resolve_release(tag)
+
+        release = {"tag_name": tag, "draft": False}
+        with patch.object(MODULE, "request", return_value=json.dumps(release).encode()):
+            with self.assertRaisesRegex(ValueError, "not immutable"):
+                MODULE.resolve_release(tag)
+
+    def test_automatic_lookup_rejects_latest_mutable_without_downgrading(self):
+        latest = {"tag_name": "v2.0.0-next.0", "draft": False, "immutable": False}
+        older = {"tag_name": "v1.9.9-next.0", "draft": False, "immutable": True}
+        with patch.object(MODULE, "request", return_value=json.dumps([latest, older]).encode()):
+            with self.assertRaisesRegex(ValueError, "not immutable"):
+                MODULE.resolve_release(None)
+
+    def test_automatic_lookup_requires_a_published_release(self):
+        with patch.object(MODULE, "request", return_value=json.dumps([]).encode()):
+            with self.assertRaisesRegex(ValueError, "No published Veasel release"):
+                MODULE.resolve_release(None)
 
     def test_release_tag_resolves_to_commit(self):
         commit = "a" * 40
@@ -170,6 +195,7 @@ class UpdatePackageTests(unittest.TestCase):
         release = {
             "tag_name": tag,
             "draft": False,
+            "immutable": True,
             "assets": [
                 {"name": "release.json", "digest": f"sha256:{MODULE.sha256(manifest_bytes)}"},
                 {"name": "veasel-Linux.tar.gz", "digest": f"sha256:{MODULE.sha256(archive)}"},
