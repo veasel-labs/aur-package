@@ -42,8 +42,12 @@ def resolve_release(tag: str | None) -> dict[str, object]:
     else:
         releases = json.loads(request(f"{API}?per_page=100"))
         release = next((item for item in releases if not item["draft"]), None)
+        if release is None:
+            raise ValueError("No published Veasel release is available")
     if release["draft"]:
         raise ValueError("Draft releases cannot be packaged")
+    if release.get("immutable") is not True:
+        raise ValueError("Release is not immutable; refusing to publish package metadata")
     if not TAG_PATTERN.fullmatch(release["tag_name"]):
         raise ValueError(f"Unsupported Veasel tag: {release['tag_name']}")
     return release
