@@ -1,4 +1,4 @@
-name: Publish packages to AUR
+name: Propose AUR mirror candidate
 
 on:
   schedule:
@@ -73,38 +73,6 @@ jobs:
             test -x /usr/lib/veasel-code/veasel-tui
             test -f /usr/share/veasel-code/build.json
           '
-      - name: Push package updates to AUR
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
-            echo "::error::Set AUR_SSH_PRIVATE_KEY in this repository's Actions secrets."
-            exit 1
-          fi
-          install -m 700 -d "$HOME/.ssh"
-          umask 077
-          trap 'rm -f "$HOME/.ssh/aur_publish"' EXIT
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur_publish"
-          unset AUR_SSH_PRIVATE_KEY
-          printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$HOME/.ssh/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_publish -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-          package=veasel-code-bin
-          package_directory="create-${package}"
-          remote="ssh://aur@aur.archlinux.org/${package}.git"
-          directory="$(mktemp -d)"
-          git clone "$remote" "$directory"
-          cp "$package_directory/PKGBUILD" "$package_directory/.SRCINFO" "$directory/"
-          git -C "$directory" config user.name "Ulises Jeremias"
-          git -C "$directory" config user.email "ulisescf.24@gmail.com"
-          git -C "$directory" add PKGBUILD .SRCINFO
-          if git -C "$directory" diff --cached --quiet; then
-            echo "${package} is already current on AUR."
-            exit 0
-          fi
-          git -C "$directory" commit -m "Update ${package} to $RELEASE_TAG"
-          git -C "$directory" push origin master
       - name: Update GitHub mirror
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,7 +111,7 @@ jobs:
 
           ## Validation
 
-          The publisher verifies the release manifest, builds and inspects the Arch package, and publishes the matching PKGBUILD and .SRCINFO to AUR. Package CI validates the proposed GitHub mirror. A human reviews and merges this mirror update.
+          The candidate workflow verifies the release manifest and builds and inspects the Arch package. Package CI validates the proposed GitHub mirror. A human reviews and merges this mirror update before the separate publisher can publish the exact approved main revision to AUR.
 
           ## Scope
 

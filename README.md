@@ -27,23 +27,26 @@ the invoking user, with no autostart or privileged helper.
 
 ## Automated updates
 
-The scheduled publisher follows Veasel's public prereleases, matches the
-release manifest and Linux archive to GitHub's asset digests, and verifies the
-manifest source commit against the immutable release tag. It refreshes the
-PKGBUILD, builds and inspects the package in Arch Linux, then pushes it to AUR
-over SSH. It opens a draft PR for the matching GitHub mirror update; a human
-reviews and merges that mirror change.
+The scheduled candidate workflow follows Veasel's public prereleases, matches
+the release manifest and Linux archive to GitHub's asset digests, and verifies
+the manifest source commit against the immutable release tag. It refreshes the
+PKGBUILD, builds and inspects the package in Arch Linux, then opens a draft PR
+for this GitHub mirror. After that exact metadata is reviewed and merged, a
+maintainer can manually run the separate approved publisher on the reviewed
+`main` revision. The publisher checks AUR RPC state before and after publishing
+and refuses downgrades or duplicate updates.
+
 Maintainer credentials are stored only as the `AUR_SSH_PRIVATE_KEY` Actions
-secret; pull-request workflows never receive that secret.
+secret; pull-request workflows and the scheduled candidate workflow never
+receive that secret.
 
 ## Release sync
 
-The scheduled **Publish packages to AUR** workflow follows the newest public
-Veasel release, verifies the release manifest against GitHub's release asset
-digest and tag commit, verifies the Linux archive against both the manifest
-and GitHub's asset digest, builds the package in Arch Linux, publishes it to
-AUR, and proposes matching files for this GitHub mirror in a draft PR. The
-exact package version is recorded in
+The scheduled **Propose AUR mirror candidate** workflow follows the newest
+public Veasel release, verifies its manifest and Linux archive, builds the
+package in Arch Linux, and proposes matching files for this GitHub mirror in a
+draft PR. The separate **Publish approved package to AUR** workflow publishes
+only the version recorded in reviewed `main` metadata. The exact package version is recorded in
 [`create-veasel-code-bin/PKGBUILD`](create-veasel-code-bin/PKGBUILD), so this
 README does not drift behind automated updates.
 
