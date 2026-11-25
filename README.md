@@ -14,9 +14,10 @@ exact files published to AUR.
 
 | AUR package | Build | Install |
 |---|---|---|
-| [`veasel-code-bin`](https://aur.archlinux.org/packages/veasel-code-bin) | Terminal CLI/TUI only; this package does not install Veasel Desktop. | `yay -S veasel-code-bin` |
+| [`veasel-code-bin`](https://aur.archlinux.org/packages/veasel-code-bin) | Terminal CLI/TUI only; does not install Veasel Desktop. | `yay -S veasel-code-bin` |
+| `veasel-desktop-bin` (GitHub mirror; AUR registration pending) | Optional Desktop app with Focus and World, from the official verified Linux `.deb`. | After AUR registration: `yay -S veasel-desktop-bin` |
 
-The package installs the native `veasel` backend and its standalone terminal client; it does **not** include the graphical Veasel Desktop application. Bun is not required at runtime.
+`veasel-code-bin` installs the native `veasel` backend and its standalone terminal client; it does **not** include the graphical Desktop app. `veasel-desktop-bin` is packaged separately from the official Linux Desktop installer and bundles its own V backend. It declares Arch runtime dependencies and adds a desktop launcher; it does not conflict with the CLI/TUI package. The GitHub mirror is ready for review, but the new Desktop package is not yet registered in AUR, so the `yay` command becomes available only after its first reviewed AUR publication. Bun and V are not runtime dependencies.
 Run `veasel` to start or reuse the local backend and open the TUI. Use
 `/connect` on the home screen to configure a provider and model, then press
 `n` to create a project session before sending prompts. Press `s` for advanced
@@ -28,13 +29,13 @@ the invoking user, with no autostart or privileged helper.
 ## Automated updates
 
 The scheduled candidate workflow follows Veasel's public prereleases, matches
-the release manifest and Linux archive to GitHub's asset digests, and verifies
-the manifest source commit against the immutable release tag. It refreshes the
-PKGBUILD, builds and inspects the package in Arch Linux, then opens a draft PR
-for this GitHub mirror. After that exact metadata is reviewed and merged, a
-maintainer can manually run the separate approved publisher on the reviewed
-`main` revision. The publisher checks AUR RPC state before and after publishing
-and refuses downgrades or duplicate updates.
+the CLI archive and Desktop `.deb` against GitHub's release digests and manifest,
+and verifies the manifest source commit against the immutable release tag. It
+refreshes both PKGBUILDs, builds and install-tests both packages in Arch Linux,
+then opens a draft PR for this GitHub mirror. After the exact metadata is
+reviewed and merged, a maintainer can manually run the separate approved
+publisher on the reviewed `main` revision. The publisher checks AUR RPC state
+before and after publishing and refuses downgrades or duplicate updates.
 
 Maintainer credentials are stored only as the `AUR_SSH_PRIVATE_KEY` Actions
 secret; pull-request workflows and the scheduled candidate workflow never
@@ -55,15 +56,15 @@ README does not drift behind automated updates.
 On Arch Linux:
 
 ```sh
-cd create-veasel-code-bin
-makepkg --printsrcinfo > .SRCINFO
-makepkg --syncdeps --cleanbuild
-namcap PKGBUILD ./*.pkg.tar.zst
+for package in create-veasel-code-bin veasel-desktop-bin; do
+  (cd "$package" && makepkg --printsrcinfo > .SRCINFO && makepkg --syncdeps --cleanbuild && namcap PKGBUILD ./*.pkg.tar.zst)
+done
 ```
 
 Run `python -m unittest discover -s scripts -p 'test_*.py'` for the release
 metadata updater tests. The release workflow tracks public prereleases; verify
 the corresponding tagged GitHub release before reporting a package version.
+The Desktop mirror is under `veasel-desktop-bin/`; run the same commands there.
 
 ## License
 

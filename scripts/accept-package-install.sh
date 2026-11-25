@@ -2,6 +2,7 @@
 set -euo pipefail
 
 pacman -Syu --noconfirm --needed namcap shadow
+pacman -S --noconfirm --needed at-spi2-core gtk3 libnotify libsecret libxss libxtst nss util-linux-libs xdg-utils
 useradd --create-home builder
 
 build_package() {
@@ -26,49 +27,69 @@ application_version() {
 
 install_package() {
 	local package_dir="$1"
+	local package_name="$2"
 	local expected_pkgver expected_pkgrel expected_app_version expected_package_version
 	expected_pkgver="$(sed -n 's/^pkgver=//p' "$package_dir/PKGBUILD")"
 	expected_pkgrel="$(sed -n 's/^pkgrel=//p' "$package_dir/PKGBUILD")"
 	expected_app_version="$(application_version "$package_dir/PKGBUILD")"
 	expected_package_version="${expected_pkgver}-${expected_pkgrel}"
-	pacman -U --noconfirm "$package_dir"/veasel-code-bin-*.pkg.tar.zst
-	[[ "$(pacman -Q veasel-code-bin | awk '{print $2}')" == "$expected_package_version" ]]
-	[[ "$(veasel --version)" == "Veasel Code ${expected_app_version}" ]]
-	test -x /usr/lib/veasel-code/veasel-tui
-	[[ "$(/usr/lib/veasel-code/veasel-tui --version)" == "Veasel Code Terminal ${expected_app_version}" ]]
-	test -f /usr/share/veasel-code/build.json
-	if pacman -Ql veasel-code-bin | grep -F ' /usr/share/applications/veasel-tui.desktop' >/dev/null; then
-		test -f /usr/share/applications/veasel-tui.desktop
-		grep -Fxq 'Exec=veasel' /usr/share/applications/veasel-tui.desktop
-		grep -Fxq 'Terminal=true' /usr/share/applications/veasel-tui.desktop
+	pacman -U --noconfirm "$package_dir"/"${package_name}"-*.pkg.tar.zst
+	[[ "$(pacman -Q "$package_name" | awk '{print $2}')" == "$expected_package_version" ]]
+	if [[ "$package_name" == veasel-code-bin ]]; then
+		[[ "$(veasel --version)" == "Veasel Code ${expected_app_version}" ]]
+		test -x /usr/lib/veasel-code/veasel-tui
+		[[ "$(/usr/lib/veasel-code/veasel-tui --version)" == "Veasel Code Terminal ${expected_app_version}" ]]
+		test -f /usr/share/veasel-code/build.json
+		if pacman -Ql veasel-code-bin | grep -F ' /usr/share/applications/veasel-tui.desktop' >/dev/null; then
+			test -f /usr/share/applications/veasel-tui.desktop
+			grep -Fxq 'Exec=veasel' /usr/share/applications/veasel-tui.desktop
+			grep -Fxq 'Terminal=true' /usr/share/applications/veasel-tui.desktop
+		else
+			test ! -e /usr/share/applications/veasel-tui.desktop
+		fi
 	else
-		test ! -e /usr/share/applications/veasel-tui.desktop
+		test -x /opt/Veasel/veasel-desktop
+		[[ "$(/opt/Veasel/resources/bin/veasel --version)" == "Veasel Code ${expected_app_version}" ]]
+		grep -Fxq 'Exec=/opt/Veasel/veasel-desktop %U' /usr/share/applications/veasel-desktop.desktop
+		grep -Fxq 'Terminal=false' /usr/share/applications/veasel-desktop.desktop
+		test -f /usr/share/icons/hicolor/512x512/apps/veasel-desktop.png
 	fi
 }
 
-build_package /workspace/create-veasel-code-bin /tmp/current-package
+build_package /workspace/create-veasel-code-bin /tmp/current-veasel-code-bin
+build_package /workspace/veasel-desktop-bin /tmp/current-veasel-desktop-bin
 
-if [[ "${HAS_PREVIOUS_PACKAGE:-false}" == "true" ]]; then
-	build_package /previous /tmp/previous-package
-	previous_version="$(package_version /tmp/previous-package/PKGBUILD)"
-	current_version="$(package_version /tmp/current-package/PKGBUILD)"
+if [[ "${HAS_PREVIOUS_CLI:-false}" == "true" ]]; then
+	build_package /previous/create-veasel-code-bin /tmp/previous-veasel-code-bin
+	previous_version="$(package_version /tmp/previous-veasel-code-bin/PKGBUILD)"
+	current_version="$(package_version /tmp/current-veasel-code-bin/PKGBUILD)"
 	if (( $(vercmp "$current_version" "$previous_version") <= 0 )); then
-		echo "Current package $current_version is not newer than base package $previous_version." >&2
+		echo "Current CLI package $current_version is not newer than base package $previous_version." >&2
 		exit 1
 	fi
-	install_package /tmp/previous-package
+	install_package /tmp/previous-veasel-code-bin veasel-code-bin
 fi
 
-install_package /tmp/current-package
-pacman -Rns --noconfirm veasel-code-bin
+if [[ "${HAS_PREVIOUS_DESKTOP:-false}" == "true" ]]; then
+	build_package /previous/veasel-desktop-bin /tmp/previous-veasel-desktop-bin
+	previous_version="$(package_version /tmp/previous-veasel-desktop-bin/PKGBUILD)"
+	current_version="$(package_version /tmp/current-veasel-desktop-bin/PKGBUILD)"
+	if (( $(vercmp "$current_version" "$previous_version") <= 0 )); then
+		echo "Current Desktop package $current_version is not newer than base package $previous_version." >&2
+		exit 1
+	fi
+	install_package /tmp/previous-veasel-desktop-bin veasel-desktop-bin
+fi
+
+install_package /tmp/current-veasel-code-bin veasel-code-bin
+install_package /tmp/current-veasel-desktop-bin veasel-desktop-bin
+pacman -Rns --noconfirm veasel-code-bin veasel-desktop-bin
 test ! -e /usr/bin/veasel
-test ! -e /usr/lib/veasel-code/veasel
 test ! -e /usr/lib/veasel-code/veasel-tui
 test ! -e /usr/share/veasel-code/build.json
 test ! -e /usr/share/applications/veasel-tui.desktop
+test ! -e /opt/Veasel/veasel-desktop
+test ! -e /usr/share/applications/veasel-desktop.desktop
+test ! -e /usr/share/icons/hicolor/512x512/apps/veasel-desktop.png
 
-if [[ "${HAS_PREVIOUS_PACKAGE:-false}" == "true" ]]; then
-	echo "AUR package install, upgrade, and uninstall acceptance passed."
-else
-	echo "AUR package clean install and uninstall acceptance passed."
-fi
+echo "AUR CLI/TUI and Desktop package install and uninstall acceptance passed."

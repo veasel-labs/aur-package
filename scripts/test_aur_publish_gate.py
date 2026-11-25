@@ -45,6 +45,18 @@ class AurPublishGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "refusing downgrade"):
                 MODULE.check("v0.103.2-next.0", self.pkgbuild, remote)
 
+    def test_unregistered_desktop_package_can_be_published_after_review(self):
+        with patch.object(MODULE, "rpc_version", return_value=None) as rpc:
+            self.assertEqual(
+                MODULE.check(
+                    "v0.103.2-next.0",
+                    self.pkgbuild,
+                    package_name="veasel-desktop-bin",
+                ),
+                "publish",
+            )
+        rpc.assert_called_once_with("veasel-desktop-bin")
+
     def test_version_order_handles_stable_after_prerelease(self):
         self.assertGreater(MODULE.version_key("1.0.0"), MODULE.version_key("1.0.0.next.99"))
 

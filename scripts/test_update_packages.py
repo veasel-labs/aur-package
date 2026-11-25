@@ -171,24 +171,68 @@ class UpdatePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not declare a successful"):
             MODULE.validate_linux_manifest(manifest, "v1.2.3-next.0", "1.2.3-next.0", "a" * 40)
 
+    def test_linux_desktop_manifest_requires_published_installer_and_matching_asset(self):
+        version = "1.2.3-next.0"
+        tag = f"v{version}"
+        data = b"verified Debian Desktop installer fixture"
+        name = f"veasel-desktop-{version}-linux-amd64.deb"
+        manifest = {
+            "tag": tag,
+            "version": version,
+            "source_commit": "a" * 40,
+            "platforms": {"linux": {
+                "status": "published", "ci_result": "success", "arch": "x86_64",
+                "desktop": {
+                    "status": "published", "ci_result": "success", "arch": "x86_64",
+                    "kind": "desktop-installer", "assets": [name],
+                },
+            }},
+            "assets": [{
+                "name": name, "platform": "linux", "arch": "x86_64",
+                "kind": "desktop-installer", "sha256": MODULE.sha256(data),
+            }],
+        }
+        self.assertEqual(
+            MODULE.validate_desktop_manifest(manifest, tag, version, "a" * 40)["sha256"],
+            MODULE.sha256(data),
+        )
+        manifest["platforms"]["linux"]["desktop"]["status"] = "failed"
+        with self.assertRaisesRegex(ValueError, "successful x86_64 Linux Desktop"):
+            MODULE.validate_desktop_manifest(manifest, tag, version, "a" * 40)
+
     def test_update_pins_release_manifest_assets_and_license_to_tag_commit(self):
         import tempfile
 
         tag = "v1.2.3-next.0"
         commit = "a" * 40
         archive = self.make_archive(["veasel", "veasel-tui", "build.json"])
+        desktop_archive = b"verified Debian Desktop installer fixture"
         license_file = b"MIT license at immutable source commit"
+        desktop_name = "veasel-desktop-1.2.3-next.0-linux-amd64.deb"
         manifest = {
             "tag": tag,
             "version": "1.2.3-next.0",
             "source_commit": commit,
-            "platforms": {"linux": {"status": "published", "ci_result": "success", "arch": "x86_64"}},
+            "platforms": {"linux": {
+                "status": "published", "ci_result": "success", "arch": "x86_64",
+                "desktop": {
+                    "status": "published", "ci_result": "success", "arch": "x86_64",
+                    "kind": "desktop-installer", "assets": [desktop_name],
+                },
+            }},
             "assets": [{
                 "name": "veasel-Linux.tar.gz",
                 "platform": "linux",
                 "arch": "x86_64",
                 "kind": "cli-archive",
                 "sha256": MODULE.sha256(archive),
+            }, {
+                "name": desktop_name,
+                "platform": "linux",
+                "arch": "x86_64",
+                "kind": "desktop-installer",
+                "signed": False,
+                "sha256": MODULE.sha256(desktop_archive),
             }],
         }
         manifest_bytes = json.dumps(manifest).encode()
@@ -199,18 +243,21 @@ class UpdatePackageTests(unittest.TestCase):
             "assets": [
                 {"name": "release.json", "digest": f"sha256:{MODULE.sha256(manifest_bytes)}"},
                 {"name": "veasel-Linux.tar.gz", "digest": f"sha256:{MODULE.sha256(archive)}"},
+                {"name": desktop_name, "digest": f"sha256:{MODULE.sha256(desktop_archive)}"},
             ],
         }
         api_release = f"{MODULE.API}/tags/{tag}"
         api_tag = f"{MODULE.GIT_API}/ref/tags/{tag}"
         manifest_url = f"https://github.com/veasel-labs/veasel/releases/download/{tag}/release.json"
         archive_url = f"https://github.com/veasel-labs/veasel/releases/download/{tag}/veasel-Linux.tar.gz"
+        desktop_url = f"https://github.com/veasel-labs/veasel/releases/download/{tag}/{desktop_name}"
         license_url = f"{MODULE.RAW}/{commit}/LICENSE"
         responses = {
             api_release: json.dumps(release).encode(),
             api_tag: json.dumps({"object": {"type": "commit", "sha": commit}}).encode(),
             manifest_url: manifest_bytes,
             archive_url: archive,
+            desktop_url: desktop_archive,
             license_url: license_file,
         }
 
@@ -220,6 +267,10 @@ class UpdatePackageTests(unittest.TestCase):
             package.mkdir()
             pkgbuild = package / "PKGBUILD"
             pkgbuild.write_text("pkgver=0.1.0\npkgrel=1\nsha256sums=(\n  'old'\n)\n")
+            desktop_package = root / "veasel-desktop-bin"
+            desktop_package.mkdir()
+            desktop_pkgbuild = desktop_package / "PKGBUILD"
+            desktop_pkgbuild.write_text("pkgver=0.1.0\npkgrel=1\nsha256sums=(\n  'old'\n)\n")
             with patch.object(MODULE, "ROOT", root), patch.object(
                 MODULE, "request", side_effect=lambda url: responses[url]
             ) as request:
@@ -229,6 +280,10 @@ class UpdatePackageTests(unittest.TestCase):
             self.assertIn("pkgver=1.2.3.next.0", content)
             self.assertIn(MODULE.sha256(archive), content)
             self.assertIn(MODULE.sha256(license_file), content)
+            desktop_content = desktop_pkgbuild.read_text()
+            self.assertIn("pkgver=1.2.3.next.0", desktop_content)
+            self.assertIn(MODULE.sha256(desktop_archive), desktop_content)
+            self.assertIn(MODULE.sha256(license_file), desktop_content)
             self.assertIn(call(api_tag), request.call_args_list)
             self.assertIn(call(license_url), request.call_args_list)
 

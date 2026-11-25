@@ -137,6 +137,59 @@ def validate_linux_manifest(
     return asset
 
 
+def validate_desktop_manifest(
+    manifest: dict[str, object], tag_name: str, version: str, source_commit: str
+) -> dict[str, object]:
+    if (
+        manifest.get("tag") != tag_name
+        or manifest.get("version") != version
+        or manifest.get("source_commit") != source_commit
+    ):
+        raise ValueError("Release manifest tag/version/source commit do not match GitHub metadata")
+    platforms = manifest.get("platforms")
+    linux = platforms.get("linux") if isinstance(platforms, dict) else None
+    desktop = linux.get("desktop") if isinstance(linux, dict) else None
+    if (
+        not isinstance(linux, dict)
+        or linux.get("status") != "published"
+        or linux.get("ci_result") != "success"
+        or linux.get("arch") != "x86_64"
+        or not isinstance(desktop, dict)
+        or desktop.get("status") != "published"
+        or desktop.get("ci_result") != "success"
+        or desktop.get("arch") != "x86_64"
+        or desktop.get("kind") != "desktop-installer"
+    ):
+        raise ValueError("Release manifest does not declare a successful x86_64 Linux Desktop installer")
+    asset_name = f"veasel-desktop-{version}-linux-amd64.deb"
+    desktop_names = desktop.get("assets")
+    if (
+        not isinstance(desktop_names, list)
+        or not all(isinstance(name, str) for name in desktop_names)
+        or desktop_names.count(asset_name) != 1
+        or len(desktop_names) != len(set(desktop_names))
+    ):
+        raise ValueError("Release manifest Linux Desktop assets are missing or inconsistent")
+    assets = manifest.get("assets")
+    matching = [
+        item for item in assets
+        if isinstance(item, dict) and item.get("name") == asset_name
+    ] if isinstance(assets, list) else []
+    if len(matching) != 1:
+        raise ValueError("Release manifest has an ambiguous or missing Linux Desktop asset")
+    asset = matching[0]
+    if (
+        asset.get("platform") != "linux"
+        or asset.get("arch") != "x86_64"
+        or asset.get("kind") != "desktop-installer"
+    ):
+        raise ValueError("Release manifest Linux Desktop asset metadata is inconsistent")
+    digest = asset.get("sha256")
+    if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
+        raise ValueError("Release manifest Linux Desktop asset has an invalid SHA-256 digest")
+    return asset
+
+
 def validate_linux_bundle(archive_data: bytes) -> None:
     required_files = {"veasel", "veasel-tui", "build.json"}
     try:
@@ -187,9 +240,16 @@ def update(tag: str | None) -> str:
     if github_digest != asset["sha256"]:
         raise ValueError("Linux archive digest does not match release.json")
     validate_linux_bundle(linux_archive)
+    desktop_asset = validate_desktop_manifest(manifest, tag_name, version, source_commit)
+    desktop_archive = request(f"{base}/{desktop_asset['name']}")
+    desktop_digest = verify_github_asset_digest(release, str(desktop_asset["name"]), desktop_archive)
+    if desktop_digest != desktop_asset["sha256"]:
+        raise ValueError("Linux Desktop archive digest does not match release.json")
     license_file = request(f"{RAW}/{source_commit}/LICENSE")
     binary = ROOT / "create-veasel-code-bin/PKGBUILD"
     replace_pkg_metadata(binary, package_version, [sha256(linux_archive), sha256(license_file)])
+    desktop_package = ROOT / "veasel-desktop-bin/PKGBUILD"
+    replace_pkg_metadata(desktop_package, package_version, [sha256(desktop_archive), sha256(license_file)])
     return tag_name
 
 

@@ -51,27 +51,33 @@ jobs:
             echo "tag=$tag"
             echo "branch=automation/aur-mirror-${tag}"
           } >> "$GITHUB_OUTPUT"
-      - name: Regenerate SRCINFO and build the Arch package
+      - name: Regenerate SRCINFO and install-test both Arch packages
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD:/workspace" archlinux:base-devel bash -lc '
             pacman -Syu --noconfirm --needed namcap shadow
+            pacman -S --noconfirm --needed at-spi2-core gtk3 libnotify libsecret libxss libxtst nss util-linux-libs xdg-utils
             useradd --create-home builder
-            package=create-veasel-code-bin
-            cp -a "/workspace/$package" "/tmp/$package"
-            chown -R builder:builder "/tmp/$package"
-            cd "/tmp/$package"
-            su builder -c "cd /tmp/$package && makepkg --printsrcinfo > .SRCINFO"
-            install -m 644 .SRCINFO "/workspace/$package/.SRCINFO"
-            namcap PKGBUILD
-            su builder -c "cd /tmp/$package && makepkg --cleanbuild --noconfirm"
-            namcap "/tmp/$package"/*.pkg.tar.zst
-            pacman -U --noconfirm "/tmp/$package"/*.pkg.tar.zst
-            expected_version="$(sed -n 's/^pkgver=//p' PKGBUILD | sed 's/\.next\./-next./')"
-            test "$(veasel --version)" = "Veasel Code $expected_version"
+            for package in create-veasel-code-bin veasel-desktop-bin; do
+              cp -a "/workspace/$package" "/tmp/$package"
+              chown -R builder:builder "/tmp/$package"
+              cd "/tmp/$package"
+              su builder -c "cd /tmp/$package && makepkg --printsrcinfo > .SRCINFO"
+              install -m 644 .SRCINFO "/workspace/$package/.SRCINFO"
+              namcap PKGBUILD
+              su builder -c "cd /tmp/$package && makepkg --cleanbuild --noconfirm"
+              namcap "/tmp/$package"/*.pkg.tar.zst
+            done
+            pacman -U --noconfirm /tmp/create-veasel-code-bin/*.pkg.tar.zst /tmp/veasel-desktop-bin/*.pkg.tar.zst
+            expected="$(sed -n "s/^pkgver=//p" /workspace/create-veasel-code-bin/PKGBUILD | sed "s/\.next\./-next./")"
+            test "$(veasel --version)" = "Veasel Code $expected"
             veasel --help | grep -Fq "Start or reuse the local V backend"
             test -x /usr/lib/veasel-code/veasel-tui
             test -f /usr/share/veasel-code/build.json
+            test -x /opt/Veasel/veasel-desktop
+            test "$(/opt/Veasel/resources/bin/veasel --version)" = "Veasel Code $expected"
+            grep -Fxq "Exec=/opt/Veasel/veasel-desktop %U" /usr/share/applications/veasel-desktop.desktop
+            test -f /usr/share/icons/hicolor/512x512/apps/veasel-desktop.png
           '
       - name: Update GitHub mirror
         env:
@@ -81,13 +87,16 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          files=(create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO)
+          files=(create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO veasel-desktop-bin/PKGBUILD veasel-desktop-bin/.SRCINFO)
           if git diff --quiet -- "${files[@]}"; then
             echo "GitHub package mirror is already current."
             exit 0
           fi
           mirror_directory="$(mktemp -d)"
-          cp "${files[@]}" "$mirror_directory/"
+          for package in create-veasel-code-bin veasel-desktop-bin; do
+            mkdir -p "$mirror_directory/$package"
+            cp "$package/PKGBUILD" "$package/.SRCINFO" "$mirror_directory/$package/"
+          done
           git restore --source=HEAD --staged --worktree -- "${files[@]}"
           if git ls-remote --exit-code origin "refs/heads/$RELEASE_BRANCH" >/dev/null 2>&1; then
             git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
@@ -95,8 +104,10 @@ jobs:
           else
             git switch --create "$RELEASE_BRANCH"
           fi
-          cp "$mirror_directory/PKGBUILD" create-veasel-code-bin/PKGBUILD
-          cp "$mirror_directory/.SRCINFO" create-veasel-code-bin/.SRCINFO
+          for package in create-veasel-code-bin veasel-desktop-bin; do
+            cp "$mirror_directory/$package/PKGBUILD" "$package/PKGBUILD"
+            cp "$mirror_directory/$package/.SRCINFO" "$package/.SRCINFO"
+          done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${files[@]}"
@@ -107,15 +118,15 @@ jobs:
           cat > "$RUNNER_TEMP/aur-mirror-pr.md" <<EOF
           ## Summary
 
-          Sync the GitHub package mirror to verified AUR package release ${RELEASE_TAG}.
+          Sync the CLI/TUI and optional Desktop package mirrors to verified Veasel release ${RELEASE_TAG}.
 
           ## Validation
 
-          The candidate workflow verifies the release manifest and builds and inspects the Arch package. Package CI validates the proposed GitHub mirror. A human reviews and merges this mirror update before the separate publisher can publish the exact approved main revision to AUR.
+          The candidate workflow verifies the release manifest, GitHub asset digests, and tag source commit, then builds and inspects both Arch packages. Package CI validates the proposed GitHub mirror. A human reviews and merges this mirror update before the separate publisher can publish the exact approved main revision to AUR.
 
           ## Scope
 
-          Generated PKGBUILD and .SRCINFO only.
+          Generated CLI/TUI and Desktop PKGBUILD and .SRCINFO only.
           EOF
           pull_request="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
             --head "$RELEASE_BRANCH" \

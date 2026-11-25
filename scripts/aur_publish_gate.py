@@ -10,7 +10,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-RPC = "https://aur.archlinux.org/rpc/v5/info/veasel-code-bin"
+RPC = "https://aur.archlinux.org/rpc/v5/info"
 TAG = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:-next\.\d+)?)$")
 PKGVER = re.compile(r"(?m)^pkgver=(\S+)$")
 
@@ -24,13 +24,17 @@ def version_key(version: str) -> tuple[int, int, int, int, int]:
     return int(major), int(minor), int(patch), 1 if prerelease is None else 0, int(prerelease or 0)
 
 
-def rpc_version() -> str:
-    request = urllib.request.Request(RPC, headers={"User-Agent": "veasel-aur-publisher"})
+def rpc_version(package_name: str = "veasel-code-bin") -> str | None:
+    request = urllib.request.Request(
+        f"{RPC}/{package_name}", headers={"User-Agent": "veasel-aur-publisher"}
+    )
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.loads(response.read())
     results = payload.get("results", [])
-    if len(results) != 1 or results[0].get("Name") != "veasel-code-bin":
-        raise ValueError("AUR RPC did not return exactly one veasel-code-bin package")
+    if not results:
+        return None
+    if len(results) != 1 or results[0].get("Name") != package_name:
+        raise ValueError(f"AUR RPC did not return exactly one {package_name} package")
     return str(results[0]["Version"])
 
 
@@ -48,25 +52,38 @@ def package_version(pkgbuild: Path) -> str:
     return match.group(1)
 
 
-def check(tag: str, pkgbuild: Path, remote_pkgbuild: Path | None = None) -> str:
+def check(
+    tag: str,
+    pkgbuild: Path,
+    remote_pkgbuild: Path | None = None,
+    package_name: str = "veasel-code-bin",
+) -> str:
     expected = expected_package_version(tag)
     actual = package_version(pkgbuild)
     if actual != expected:
         raise ValueError(f"Reviewed PKGBUILD pkgver {actual} does not match requested {expected}")
-    observed = [rpc_version().rsplit("-", 1)[0]]
-    if remote_pkgbuild is not None:
+    remote = rpc_version(package_name)
+    observed = [remote.rsplit("-", 1)[0]] if remote is not None else []
+    if remote_pkgbuild is not None and remote_pkgbuild.is_file():
         observed.append(package_version(remote_pkgbuild))
+    if not observed:
+        return "publish"
     current = max(observed, key=version_key)
     if version_key(current) > version_key(expected):
         raise ValueError(f"AUR already has newer version {current}; refusing downgrade to {expected}")
     return "already-current" if version_key(current) == version_key(expected) else "publish"
 
 
-def wait(tag: str, timeout: int = 900) -> None:
+def wait(tag: str, timeout: int = 900, package_name: str = "veasel-code-bin") -> None:
     expected = expected_package_version(tag)
     deadline = time.monotonic() + timeout
     while True:
-        current = rpc_version()
+        current = rpc_version(package_name)
+        if current is None:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"AUR RPC did not report {expected} within {timeout} seconds")
+            time.sleep(15)
+            continue
         current_ver = current.rsplit("-", 1)[0]
         if version_key(current_ver) == version_key(expected):
             return
@@ -83,10 +100,13 @@ if __name__ == "__main__":
         tag = sys.argv[2]
         if mode == "check":
             path = Path(sys.argv[3])
-            print(check(tag, path, Path(sys.argv[4]) if len(sys.argv) > 4 else None))
+            package_name = sys.argv[4] if len(sys.argv) > 4 else "veasel-code-bin"
+            remote = Path(sys.argv[5]) if len(sys.argv) > 5 else None
+            print(check(tag, path, remote, package_name))
         elif mode == "wait":
-            wait(tag)
-            print(f"AUR RPC confirms {expected_package_version(tag)}")
+            package_name = sys.argv[3] if len(sys.argv) > 3 else "veasel-code-bin"
+            wait(tag, package_name=package_name)
+            print(f"AUR RPC confirms {package_name} {expected_package_version(tag)}")
         else:
             raise ValueError(f"Unknown mode: {mode}")
     except (OSError, ValueError, KeyError, TimeoutError, IndexError) as error:
