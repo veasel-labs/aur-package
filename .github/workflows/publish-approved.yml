@@ -27,15 +27,16 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14.0"
-      - name: Verify reviewed main metadata and current AUR version
+      - name: Verify reviewed main metadata and current AUR versions
         id: gate
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" create-veasel-code-bin/PKGBUILD)"
-          printf '%s\n' "$result"
-          if [[ "$result" == already-current ]]; then
+          cli_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" create-veasel-code-bin/PKGBUILD veasel-code-bin)"
+          desktop_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" veasel-desktop-bin/PKGBUILD veasel-desktop-bin)"
+          printf 'CLI/TUI: %s\nDesktop: %s\n' "$cli_result" "$desktop_result"
+          if [[ "$cli_result" == already-current && "$desktop_result" == already-current ]]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
@@ -48,30 +49,18 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/update-packages.py "$RELEASE_TAG"
-          git diff --exit-code -- create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO
-      - name: Build and smoke-test the exact approved package
+          git diff --exit-code -- create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO \
+            veasel-desktop-bin/PKGBUILD veasel-desktop-bin/.SRCINFO
+      - name: Build and install-test the exact approved packages
         if: steps.gate.outputs.publish == 'true'
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/workspace:ro" archlinux:base-devel bash -lc '
-            pacman -Syu --noconfirm --needed namcap shadow
-            useradd --create-home builder
-            cp -a /workspace/create-veasel-code-bin /tmp/create-veasel-code-bin
-            chown -R builder:builder /tmp/create-veasel-code-bin
-            cd /tmp/create-veasel-code-bin
-            makepkg --printsrcinfo > generated.SRCINFO
-            cmp generated.SRCINFO .SRCINFO
-            namcap PKGBUILD
-            su builder -c "cd /tmp/create-veasel-code-bin && makepkg --cleanbuild --noconfirm"
-            namcap ./*.pkg.tar.zst
-            pacman -U --noconfirm ./*.pkg.tar.zst
-            expected="$(sed -n "s/^pkgver=//p" PKGBUILD | sed "s/\.next\./-next./")"
-            test "$(veasel --version)" = "Veasel Code $expected"
-            veasel --help | grep -Fq "Start or reuse the local V backend"
-            test -x /usr/lib/veasel-code/veasel-tui
-            test -f /usr/share/veasel-code/build.json
-          '
-      - name: Publish to AUR and confirm RPC state
+          docker run --rm \
+            -e HAS_PREVIOUS_CLI=false \
+            -e HAS_PREVIOUS_DESKTOP=false \
+            -v "$PWD:/workspace:ro" \
+            archlinux:base-devel bash /workspace/scripts/accept-package-install.sh
+      - name: Publish reviewed packages to AUR and confirm RPC state
         if: steps.gate.outputs.publish == 'true'
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -86,20 +75,30 @@ jobs:
           unset AUR_SSH_PRIVATE_KEY
           printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$HOME/.ssh/known_hosts"
           export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_publish -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-          directory="$(mktemp -d)"
-          git clone ssh://aur@aur.archlinux.org/veasel-code-bin.git "$directory"
-          gate_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" create-veasel-code-bin/PKGBUILD "$directory/PKGBUILD")"
-          printf '%s\n' "$gate_result"
-          if [[ "$gate_result" == already-current ]]; then
-            echo "AUR already has the approved version; skipping duplicate publication."
-            exit 0
-          fi
-          cp create-veasel-code-bin/PKGBUILD create-veasel-code-bin/.SRCINFO "$directory/"
-          git -C "$directory" config user.name "Ulises Jeremias"
-          git -C "$directory" config user.email "ulisescf.24@gmail.com"
-          git -C "$directory" add PKGBUILD .SRCINFO
-          if ! git -C "$directory" diff --cached --quiet; then
-            git -C "$directory" commit -m "Update veasel-code-bin to $RELEASE_TAG"
-            git -C "$directory" push origin master
-          fi
-          python scripts/aur_publish_gate.py wait "$RELEASE_TAG"
+          for package in create-veasel-code-bin veasel-desktop-bin; do
+            if [[ "$package" == create-veasel-code-bin ]]; then
+              package_name=veasel-code-bin
+            else
+              package_name=veasel-desktop-bin
+            fi
+            directory="$(mktemp -d)"
+            git clone "ssh://aur@aur.archlinux.org/${package_name}.git" "$directory"
+            gate_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" "$package/PKGBUILD" "$package_name" "$directory/PKGBUILD")"
+            printf '%s: %s\n' "$package_name" "$gate_result"
+            if [[ "$gate_result" == already-current ]]; then
+              echo "$package_name already has the approved version; skipping duplicate publication."
+              continue
+            fi
+            if ! git -C "$directory" rev-parse --verify HEAD >/dev/null 2>&1; then
+              git -C "$directory" checkout --orphan master
+            fi
+            cp "$package/PKGBUILD" "$package/.SRCINFO" "$directory/"
+            git -C "$directory" config user.name "Ulises Jeremias"
+            git -C "$directory" config user.email "ulisescf.24@gmail.com"
+            git -C "$directory" add PKGBUILD .SRCINFO
+            if ! git -C "$directory" diff --cached --quiet; then
+              git -C "$directory" commit -m "Update ${package_name} to $RELEASE_TAG"
+              git -C "$directory" push origin master
+            fi
+            python scripts/aur_publish_gate.py wait "$RELEASE_TAG" "$package_name"
+          done
