@@ -82,8 +82,22 @@ jobs:
               package_name=veasel-desktop-bin
             fi
             directory="$(mktemp -d)"
-            git clone "ssh://aur@aur.archlinux.org/${package_name}.git" "$directory"
-            gate_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" "$package/PKGBUILD" "$package_name" "$directory/PKGBUILD")"
+            remote="ssh://aur@aur.archlinux.org/${package_name}.git"
+            remote_pkgbuild="$directory/PKGBUILD"
+            registration="$(python scripts/aur_publish_gate.py registration "$package_name")"
+            if [[ "$registration" == registered ]]; then
+              git clone "$remote" "$directory"
+              echo "Found existing AUR package ${package_name}."
+            elif [[ "$registration" == unregistered ]]; then
+              echo "AUR package ${package_name} is not registered yet; bootstrapping its first reviewed publication."
+              git -C "$directory" init --initial-branch=master >/dev/null
+              git -C "$directory" remote add origin "$remote"
+              remote_pkgbuild="$directory/PKGBUILD"
+            else
+              echo "Unexpected AUR registration state: $registration" >&2
+              exit 1
+            fi
+            gate_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" "$package/PKGBUILD" "$package_name" "$remote_pkgbuild")"
             printf '%s: %s\n' "$package_name" "$gate_result"
             if [[ "$gate_result" == already-current ]]; then
               echo "$package_name already has the approved version; skipping duplicate publication."

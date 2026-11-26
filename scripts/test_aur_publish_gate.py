@@ -57,6 +57,20 @@ class AurPublishGateTests(unittest.TestCase):
             )
         rpc.assert_called_once_with("veasel-desktop-bin")
 
+    def test_registration_status_bootstraps_only_when_rpc_reports_absent(self):
+        with patch.object(MODULE, "rpc_version", return_value=None) as rpc:
+            self.assertEqual(MODULE.registration_status("veasel-desktop-bin"), "unregistered")
+        rpc.assert_called_once_with("veasel-desktop-bin")
+
+        with patch.object(MODULE, "rpc_version", return_value="0.105.0.next.0-1") as rpc:
+            self.assertEqual(MODULE.registration_status("veasel-desktop-bin"), "registered")
+        rpc.assert_called_once_with("veasel-desktop-bin")
+
+    def test_registration_status_propagates_transport_failure(self):
+        with patch.object(MODULE, "rpc_version", side_effect=OSError("network down")):
+            with self.assertRaisesRegex(OSError, "network down"):
+                MODULE.registration_status("veasel-desktop-bin")
+
     def test_version_order_handles_stable_after_prerelease(self):
         self.assertGreater(MODULE.version_key("1.0.0"), MODULE.version_key("1.0.0.next.99"))
 

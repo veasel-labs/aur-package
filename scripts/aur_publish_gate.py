@@ -38,6 +38,11 @@ def rpc_version(package_name: str = "veasel-code-bin") -> str | None:
     return str(results[0]["Version"])
 
 
+def registration_status(package_name: str) -> str:
+    """Return the AUR registration state, propagating transport failures."""
+    return "registered" if rpc_version(package_name) is not None else "unregistered"
+
+
 def expected_package_version(tag: str) -> str:
     match = TAG.fullmatch(tag)
     if not match:
@@ -107,6 +112,9 @@ if __name__ == "__main__":
             package_name = sys.argv[3] if len(sys.argv) > 3 else "veasel-code-bin"
             wait(tag, package_name=package_name)
             print(f"AUR RPC confirms {package_name} {expected_package_version(tag)}")
+        elif mode == "registration":
+            package_name = sys.argv[2]
+            print(registration_status(package_name))
         else:
             raise ValueError(f"Unknown mode: {mode}")
     except (OSError, ValueError, KeyError, TimeoutError, IndexError) as error:
