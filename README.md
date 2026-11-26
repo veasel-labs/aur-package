@@ -15,9 +15,9 @@ exact files published to AUR.
 | AUR package | Build | Install |
 |---|---|---|
 | [`veasel-code-bin`](https://aur.archlinux.org/packages/veasel-code-bin) | Terminal CLI/TUI only; does not install Veasel Desktop. | `yay -S veasel-code-bin` |
-| `veasel-desktop-bin` (GitHub mirror; AUR registration pending) | Optional Desktop app with Focus and World, from the official verified Linux `.deb`. | After AUR registration: `yay -S veasel-desktop-bin` |
+| [`veasel-desktop-bin`](https://aur.archlinux.org/packages/veasel-desktop-bin) | Optional Desktop app with Focus and World, from the official verified Linux `.deb`. | `yay -S veasel-desktop-bin` |
 
-`veasel-code-bin` installs the native `veasel` backend and its standalone terminal client; it does **not** include the graphical Desktop app. `veasel-desktop-bin` is packaged separately from the official Linux Desktop installer and bundles its own V backend. It declares Arch runtime dependencies and adds a desktop launcher; it does not conflict with the CLI/TUI package. The GitHub mirror is ready for review, but the new Desktop package is not yet registered in AUR, so the `yay` command becomes available only after its first reviewed AUR publication. Bun and V are not runtime dependencies.
+`veasel-code-bin` installs the native `veasel` backend and its standalone terminal client; it does **not** include the graphical Desktop app. `veasel-desktop-bin` is packaged separately from the official Linux Desktop installer and bundles its own V backend. It declares Arch runtime dependencies and adds a desktop launcher; it does not conflict with the CLI/TUI package. The reviewed GitHub mirror is published to AUR by the approved publication workflow. Bun and V are not runtime dependencies.
 Run `veasel` to start or reuse the local backend and open the TUI. Use
 `/connect` on the home screen to configure a provider and model, then press
 `n` to create a project session before sending prompts. Press `s` for advanced
