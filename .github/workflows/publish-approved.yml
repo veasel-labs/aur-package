@@ -84,14 +84,18 @@ jobs:
             directory="$(mktemp -d)"
             remote="ssh://aur@aur.archlinux.org/${package_name}.git"
             remote_pkgbuild="$directory/PKGBUILD"
-            if git clone "$remote" "$directory"; then
+            registration="$(python scripts/aur_publish_gate.py registration "$package_name")"
+            if [[ "$registration" == registered ]]; then
+              git clone "$remote" "$directory"
               echo "Found existing AUR package ${package_name}."
-            else
+            elif [[ "$registration" == unregistered ]]; then
               echo "AUR package ${package_name} is not registered yet; bootstrapping its first reviewed publication."
-              rm -rf "$directory"
-              directory="$(mktemp -d)"
               git -C "$directory" init --initial-branch=master >/dev/null
+              git -C "$directory" remote add origin "$remote"
               remote_pkgbuild="$directory/PKGBUILD"
+            else
+              echo "Unexpected AUR registration state: $registration" >&2
+              exit 1
             fi
             gate_result="$(python scripts/aur_publish_gate.py check "$RELEASE_TAG" "$package/PKGBUILD" "$package_name" "$remote_pkgbuild")"
             printf '%s: %s\n' "$package_name" "$gate_result"
